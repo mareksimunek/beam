@@ -17,8 +17,8 @@ package cz.seznam.euphoria.beam;
 
 import static org.junit.Assert.assertTrue;
 
+import cz.seznam.euphoria.beam.window.BeamWindowing;
 import cz.seznam.euphoria.core.client.dataset.Dataset;
-import cz.seznam.euphoria.core.client.dataset.windowing.Time;
 import cz.seznam.euphoria.core.client.dataset.windowing.TimeInterval;
 import cz.seznam.euphoria.core.client.dataset.windowing.Window;
 import cz.seznam.euphoria.core.client.dataset.windowing.WindowedElement;
@@ -48,6 +48,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.windowing.AfterWatermark;
+import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.values.WindowingStrategy.AccumulationMode;
 import org.junit.Ignore;
 import org.junit.Test;
 
@@ -74,7 +77,10 @@ public class ReduceByKeyTest {
     ReduceByKey.of(flow.createInput(input, e -> 1000L * e))
         .keyBy(i -> i % 2)
         .reduceBy(Sums.ofInts())
-        .windowBy(Time.of(Duration.ofHours(1)))
+        .windowBy(BeamWindowing.of(
+            FixedWindows.of(org.joda.time.Duration.standardHours(1)),
+            AfterWatermark.pastEndOfWindow(),
+            AccumulationMode.DISCARDING_FIRED_PANES))
         .output()
         .persist(output);
 
@@ -116,11 +122,15 @@ public class ReduceByKeyTest {
     ListDataSink<Pair<Integer, Long>> sink = ListDataSink.get();
     Dataset<Pair<Integer, Long>> input = flow.createInput(source);
     input = AssignEventTime.of(input).using(Pair::getSecond).output();
+
     ReduceByKey.of(input)
         .keyBy(Pair::getFirst)
         .valueBy(e -> 1L)
         .combineBy(Sums.ofLongs())
-        .windowBy(Time.of(Duration.ofSeconds(1)))
+        .windowBy(BeamWindowing.of(
+            FixedWindows.of(org.joda.time.Duration.standardSeconds(1)),
+            AfterWatermark.pastEndOfWindow(),
+            AccumulationMode.DISCARDING_FIRED_PANES))
         .output()
         .persist(sink);
 
@@ -170,7 +180,10 @@ public class ReduceByKeyTest {
             .keyBy(e -> "", TypeHint.ofString())
             .valueBy(Pair::getFirst, TypeHint.ofInt())
             .combineBy(Sums.ofInts(), TypeHint.ofInt())
-            .windowBy(Time.of(Duration.ofSeconds(5)))
+            .windowBy(BeamWindowing.of(
+                FixedWindows.of(org.joda.time.Duration.standardSeconds(5)),
+                AfterWatermark.pastEndOfWindow(),
+                AccumulationMode.DISCARDING_FIRED_PANES))
             .output();
     // ~ now use a custom windowing with a trigger which does
     // the assertions subject to this test (use RSBK which has to
