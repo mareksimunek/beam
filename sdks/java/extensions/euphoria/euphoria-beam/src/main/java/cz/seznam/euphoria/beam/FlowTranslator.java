@@ -52,6 +52,7 @@ class FlowTranslator {
     // extended operators
     translators.put(ReduceByKey.class, new ReduceByKeyTranslator());
     translators.put(ReduceStateByKey.class, new ReduceStateByKeyTranslator());
+    translators.put(JoinTranslator.class, new JoinTranslator());
   }
 
   static Pipeline toPipeline(
