@@ -20,6 +20,7 @@ import cz.seznam.euphoria.core.client.accumulators.AccumulatorProvider;
 import cz.seznam.euphoria.core.client.flow.Flow;
 import cz.seznam.euphoria.core.client.io.DataSink;
 import cz.seznam.euphoria.core.client.operator.FlatMap;
+import cz.seznam.euphoria.core.client.operator.Join;
 import cz.seznam.euphoria.core.client.operator.Operator;
 import cz.seznam.euphoria.core.client.operator.ReduceByKey;
 import cz.seznam.euphoria.core.client.operator.ReduceStateByKey;
@@ -52,7 +53,7 @@ class FlowTranslator {
     // extended operators
     translators.put(ReduceByKey.class, new ReduceByKeyTranslator());
     translators.put(ReduceStateByKey.class, new ReduceStateByKeyTranslator());
-    translators.put(JoinTranslator.class, new JoinTranslator());
+    translators.put(Join.class, new JoinTranslator());
   }
 
   static Pipeline toPipeline(

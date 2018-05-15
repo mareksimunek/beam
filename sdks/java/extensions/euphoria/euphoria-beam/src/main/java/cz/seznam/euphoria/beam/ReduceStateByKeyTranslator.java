@@ -63,6 +63,6 @@ public class ReduceStateByKeyTranslator implements OperatorTranslator<ReduceStat
           .setCoder(new KryoCoder<>());
     }
     */
-    throw new UnsupportedOperationException("Not supported yet");
+    throw new UnsupportedOperationException("ReduceStateByKy is not supported yet.");
   }
 }
