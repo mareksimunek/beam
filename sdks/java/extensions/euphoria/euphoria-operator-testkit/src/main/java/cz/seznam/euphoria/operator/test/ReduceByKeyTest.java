@@ -21,12 +21,11 @@ import static org.junit.Assert.assertTrue;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import cz.seznam.euphoria.beam.io.KryoCoder;
+import cz.seznam.euphoria.beam.window.BeamWindowing;
 import cz.seznam.euphoria.core.client.dataset.Dataset;
 import cz.seznam.euphoria.core.client.dataset.windowing.Count;
-import cz.seznam.euphoria.core.client.dataset.windowing.GlobalWindowing;
 import cz.seznam.euphoria.core.client.dataset.windowing.MergingWindowing;
-import cz.seznam.euphoria.core.client.dataset.windowing.Session;
-import cz.seznam.euphoria.core.client.dataset.windowing.Time;
 import cz.seznam.euphoria.core.client.dataset.windowing.TimeInterval;
 import cz.seznam.euphoria.core.client.dataset.windowing.Window;
 import cz.seznam.euphoria.core.client.dataset.windowing.WindowedElement;
@@ -42,7 +41,6 @@ import cz.seznam.euphoria.core.client.operator.state.State;
 import cz.seznam.euphoria.core.client.operator.state.StateContext;
 import cz.seznam.euphoria.core.client.operator.state.ValueStorage;
 import cz.seznam.euphoria.core.client.operator.state.ValueStorageDescriptor;
-import cz.seznam.euphoria.core.client.triggers.CountTrigger;
 import cz.seznam.euphoria.core.client.triggers.NoopTrigger;
 import cz.seznam.euphoria.core.client.triggers.Trigger;
 import cz.seznam.euphoria.core.client.triggers.TriggerContext;
@@ -54,7 +52,6 @@ import cz.seznam.euphoria.core.client.util.Triple;
 import cz.seznam.euphoria.operator.test.accumulators.SnapshotProvider;
 import cz.seznam.euphoria.operator.test.junit.AbstractOperatorTest;
 import cz.seznam.euphoria.operator.test.junit.Processing;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -66,20 +63,28 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.apache.beam.sdk.coders.Coder;
+import org.apache.beam.sdk.transforms.windowing.AfterWatermark;
+import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
+import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindows;
+import org.apache.beam.sdk.transforms.windowing.WindowFn;
+import org.apache.beam.sdk.transforms.windowing.WindowMappingFn;
+import org.apache.beam.sdk.values.WindowingStrategy.AccumulationMode;
+import org.joda.time.Instant;
+import org.junit.Ignore;
 import org.junit.Test;
 
 /** Test operator {@code ReduceByKey}. */
 @Processing(Processing.Type.ALL)
 public class ReduceByKeyTest extends AbstractOperatorTest {
 
-  /** Validates the output type upon a `.reduceBy` operation on windows of size one. */
+  /** Validates the output type upon a `.reduceBy` operation on global window. */
   @Test
   public void testReductionType0() {
     execute(
-        new AbstractTestCase<Integer, Pair<Integer, Set<Integer>>>(
-            /* don't parallelize this test, because it doesn't work
-             * well with count windows */
-            1) {
+        new AbstractTestCase<Integer, Pair<Integer, Set<Integer>>>() {
           @Override
           protected List<Integer> getInput() {
             return Arrays.asList(1, 2, 3, 4, 5, 6, 7, 9);
@@ -91,7 +96,10 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                 .keyBy(e -> e % 2)
                 .valueBy(e -> e)
                 .reduceBy(s -> s.collect(Collectors.toSet()))
-                .windowBy(Count.of(3))
+                .windowBy(BeamWindowing.of(
+                    new GlobalWindows(),
+                    AfterWatermark.pastEndOfWindow(),
+                    AccumulationMode.DISCARDING_FIRED_PANES))
                 .output();
           }
 
@@ -99,20 +107,16 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
           public List<Pair<Integer, Set<Integer>>> getUnorderedOutput() {
             return Arrays.asList(
                 Pair.of(0, Sets.newHashSet(2, 4, 6)),
-                Pair.of(1, Sets.newHashSet(1, 3, 5)),
-                Pair.of(1, Sets.newHashSet(7, 9)));
+                Pair.of(1, Sets.newHashSet(1, 3, 5, 7, 9)));
           }
         });
   }
 
-  /** Validates the output type upon a `.reduceBy` operation on windows of size one. */
+  /** Validates the output type upon a `.reduceBy` operation on global window. */
   @Test
   public void testReductionType0_outputValues() {
     execute(
-        new AbstractTestCase<Integer, Set<Integer>>(
-            /* don't parallelize this test, because it doesn't work
-             * well with count windows */
-            1) {
+        new AbstractTestCase<Integer, Set<Integer>>() {
           @Override
           protected List<Integer> getInput() {
             return Arrays.asList(1, 2, 3, 4, 5, 6, 7, 9);
@@ -124,19 +128,23 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                 .keyBy(e -> e % 2)
                 .valueBy(e -> e)
                 .reduceBy(s -> s.collect(Collectors.toSet()))
-                .windowBy(Count.of(3))
+                .windowBy(BeamWindowing.of(
+                    new GlobalWindows(),
+                    AfterWatermark.pastEndOfWindow(),
+                    AccumulationMode.DISCARDING_FIRED_PANES))
                 .outputValues();
           }
 
           @Override
           public List<Set<Integer>> getUnorderedOutput() {
             return Arrays.asList(
-                Sets.newHashSet(2, 4, 6), Sets.newHashSet(1, 3, 5), Sets.newHashSet(7, 9));
+                Sets.newHashSet(2, 4, 6), Sets.newHashSet(1, 3, 5, 7, 9));
           }
         });
   }
 
-  /** Validates the output type upon a `.reduceBy` operation on windows of size one. */
+  /** Validates the output type upon a `.reduceBy` operation on global window. */
+  @Ignore("Sorting of values is not supported yet.")
   @Test
   public void testReductionType0WithSortedValues() {
     execute(
@@ -172,7 +180,10 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                       }
                       return cmp;
                     })
-                .windowBy(GlobalWindowing.get())
+                .windowBy(BeamWindowing.of(
+                    new GlobalWindows(),
+                    AfterWatermark.pastEndOfWindow(),
+                    AccumulationMode.DISCARDING_FIRED_PANES))
                 .output();
           }
 
@@ -211,7 +222,11 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
             return ReduceByKey.of(input)
                 .keyBy(e -> e % 2)
                 .reduceBy(Fold.whileEmittingEach(0, (a, b) -> a + b))
-                .windowBy(Count.of(3))
+//                .windowBy(Count.of(3))
+                .windowBy(BeamWindowing.of(
+                    new GlobalWindows(),
+                    AfterWatermark.pastEndOfWindow(),
+                    AccumulationMode.DISCARDING_FIRED_PANES))
                 .output();
           }
 
@@ -232,12 +247,13 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
             assertEquals(Arrays.asList(2, 6, 12), byKey.get(0));
 
             assertNotNull(byKey.get(1));
-            assertEquals(Sets.newHashSet(1, 4, 9, 7, 16), new HashSet<>(byKey.get(1)));
+            assertEquals(Sets.newHashSet(1, 4, 9, 16, 25), new HashSet<>(byKey.get(1)));
           }
 
           @Override
           public List<Pair<Integer, Integer>> getUnorderedOutput() {
-            return Arrays.asList(Pair.of(0, 12), Pair.of(1, 9), Pair.of(1, 16));
+//            return Arrays.asList(Pair.of(0, 12), Pair.of(1, 9), Pair.of(1, 16));
+            return Arrays.asList(Pair.of(0, 12), Pair.of(1, 25));
           }
         });
   }
@@ -254,7 +270,11 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                 .keyBy(Pair::getFirst)
                 .valueBy(e -> 1L)
                 .combineBy(Sums.ofLongs())
-                .windowBy(Time.of(Duration.ofSeconds(1)))
+//                .windowBy(Time.of(Duration.ofSeconds(1)))
+                .windowBy(BeamWindowing.of(
+                    FixedWindows.of(org.joda.time.Duration.standardSeconds(1)),
+                    AfterWatermark.pastEndOfWindow(),
+                    AccumulationMode.DISCARDING_FIRED_PANES))
                 .output();
           }
 
@@ -316,7 +336,11 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                 .keyBy(e -> e % 3)
                 .valueBy(e -> 1L)
                 .combineBy(Sums.ofLongs())
-                .windowBy(new TestWindowing())
+//                .windowBy(new TestWindowing())
+                .windowBy(BeamWindowing.of(
+                    new TestWindowFn(),
+                    AfterWatermark.pastEndOfWindow(),
+                    AccumulationMode.DISCARDING_FIRED_PANES))
                 .output();
           }
 
@@ -396,6 +420,7 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
         });
   }
 
+  @Ignore("Sorting of values is not supported yet.")
   @Processing(Processing.Type.BOUNDED)
   @Test
   public void testReduceSorted() {
@@ -483,7 +508,7 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
   }
 
   // ----------------------------------------------------------------------------
-
+  @Ignore("Test depends on yet unsupported functionality (access to window from Collector). ")
   @Test
   public void testSessionWindowing() {
     execute(
@@ -512,7 +537,10 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                     .keyBy(e -> e.getFirst().charAt(0) - '0')
                     .valueBy(Pair::getFirst)
                     .reduceBy(s -> s.collect(Collectors.toSet()))
-                    .windowBy(Session.of(Duration.ofMillis(5)))
+                    .windowBy(BeamWindowing.of(
+                        FixedWindows.of(org.joda.time.Duration.millis(5)),
+                        AfterWatermark.pastEndOfWindow(),
+                        AccumulationMode.DISCARDING_FIRED_PANES))
                     .output();
 
             return FlatMap.of(reduced)
@@ -543,46 +571,44 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
         });
   }
 
+
+  @Ignore("Test depends on unsupported ReduceStateByKey operator.")
   @Test
   public void testElementTimestamp() {
-    class AssertingWindowing<T> implements Windowing<T, TimeInterval> {
+
+    class AssertingWindowFn<T> extends WindowFn<T, BoundedWindow>{
+
       @Override
-      public Iterable<TimeInterval> assignWindowsToElement(WindowedElement<?, T> el) {
+      public Collection<BoundedWindow> assignWindows(AssignContext c) throws Exception {
+        long timestamp = c.timestamp().getMillis();
+
         // ~ we expect the 'element time' to be the end of the window which produced the
         // element in the preceding upstream (stateful and windowed) operator
         assertTrue(
-            "Invalid timestamp " + el.getTimestamp(),
-            el.getTimestamp() == 15_000L - 1 || el.getTimestamp() == 25_000L - 1);
-        return Collections.singleton(new TimeInterval(0, Long.MAX_VALUE));
-      }
+            "Invalid timestamp " + timestamp,
+            timestamp == 15_000L - 1 || timestamp == 25_000L - 1);
 
-      @SuppressWarnings("unchecked")
-      @Override
-      public Trigger<TimeInterval> getTrigger() {
-        return new CountTrigger(1) {
-          @Override
-          public boolean isStateful() {
-            return false;
-          }
-
-          @Override
-          public TriggerResult onElement(long time, Window window, TriggerContext ctx) {
-            // ~ we expect the 'time' to be the end of the window which produced the
-            // element in the preceding upstream (stateful and windowed) operator
-            assertTrue("Invalid timestamp " + time, time == 15_000L - 1 || time == 25_000L - 1);
-            return super.onElement(time, window, ctx);
-          }
-        };
+        return Collections.singleton(GlobalWindow.INSTANCE);
       }
 
       @Override
-      public boolean equals(Object obj) {
-        return obj instanceof AssertingWindowing;
+      public void mergeWindows(MergeContext c) throws Exception {
+
       }
 
       @Override
-      public int hashCode() {
-        return 0;
+      public boolean isCompatible(WindowFn<?, ?> other) {
+        return other instanceof GlobalWindows;
+      }
+
+      @Override
+      public Coder<BoundedWindow> windowCoder() {
+        return new KryoCoder<>(); //TODO do we need this?
+      }
+
+      @Override
+      public WindowMappingFn<BoundedWindow> getDefaultWindowMappingFn() {
+        return null;
       }
     }
 
@@ -610,7 +636,11 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                     .keyBy(e -> "", TypeHint.ofString())
                     .valueBy(Pair::getFirst, TypeHint.ofInt())
                     .combineBy(Sums.ofInts(), TypeHint.ofInt())
-                    .windowBy(Time.of(Duration.ofSeconds(5)))
+//                    .windowBy(Time.of(Duration.ofSeconds(5)))
+                    .windowBy(BeamWindowing.of(
+                        FixedWindows.of(org.joda.time.Duration.standardSeconds(5)),
+                        AfterWatermark.pastEndOfWindow(),
+                        AccumulationMode.DISCARDING_FIRED_PANES))
                     .output();
             // ~ now use a custom windowing with a trigger which does
             // the assertions subject to this test (use RSBK which has to
@@ -621,7 +651,10 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                     .valueBy(Pair::getSecond)
                     .stateFactory(SumState::new)
                     .mergeStatesBy(SumState::combine)
-                    .windowBy(new AssertingWindowing<>())
+                    .windowBy(BeamWindowing.of(
+                        new AssertingWindowFn<>(),
+                        AfterWatermark.pastEndOfWindow(),
+                        AccumulationMode.DISCARDING_FIRED_PANES))
                     .output();
             return FlatMap.of(output)
                 .using(
@@ -649,7 +682,11 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                 .keyBy(Pair::getFirst)
                 .valueBy(e -> 1L)
                 .combineBy(Sums.ofLongs())
-                .windowBy(Time.of(Duration.ofSeconds(1)))
+//                .windowBy(Time.of(Duration.ofSeconds(1)))
+                .windowBy(BeamWindowing.of(
+                    FixedWindows.of(org.joda.time.Duration.standardSeconds(1)),
+                    AfterWatermark.pastEndOfWindow(),
+                    AccumulationMode.DISCARDING_FIRED_PANES))
                 .output();
           }
 
@@ -701,7 +738,11 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
                           }
                           ctx.collect(a + b);
                         }))
-                .windowBy(GlobalWindowing.get())
+//                .windowBy(GlobalWindowing.get())
+                .windowBy(BeamWindowing.of(
+                    new GlobalWindows(),
+                    AfterWatermark.pastEndOfWindow(),
+                    AccumulationMode.DISCARDING_FIRED_PANES))
                 .output();
           }
 
@@ -743,7 +784,68 @@ public class ReduceByKeyTest extends AbstractOperatorTest {
     }
   }
 
+  private static class TestWindowFn extends WindowFn<Number, CountWindow>{
+
+    @Override
+    public Collection<CountWindow> assignWindows(AssignContext c) throws Exception {
+      Number element = c.element();
+      return Collections.singleton(new CountWindow(element.longValue() / 4 )); //TODO why /4 ?
+    }
+
+    @Override
+    public void mergeWindows(MergeContext c) throws Exception {
+
+    }
+
+    @Override
+    public boolean isNonMerging() {
+      return true;
+    }
+
+    @Override
+    public boolean isCompatible(WindowFn<?, ?> other) {
+      return false;
+    }
+
+    @Override
+    public Coder<CountWindow> windowCoder() {
+      return new KryoCoder<>();
+    }
+
+    @Override
+    public WindowMappingFn<CountWindow> getDefaultWindowMappingFn() {
+      return null;
+    }
+  }
+
   // ~ ------------------------------------------------------------------------------
+
+  private static class CountWindow extends BoundedWindow {
+
+    private long value;
+
+    public CountWindow(long value) {
+      this.value = value;
+    }
+
+    @Override
+    public Instant maxTimestamp() {
+      return GlobalWindow.INSTANCE.maxTimestamp();
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (other instanceof CountWindow) {
+        return value == (((CountWindow) other).value);
+      }
+      return false;
+    }
+
+    @Override
+    public int hashCode() {
+      return Long.hashCode(value);
+    }
+  }
 
   /**
    * Every instance is unique: this allows us to exercise merging.
