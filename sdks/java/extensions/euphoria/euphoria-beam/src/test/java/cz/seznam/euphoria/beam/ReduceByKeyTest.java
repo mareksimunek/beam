@@ -43,11 +43,8 @@ import cz.seznam.euphoria.core.client.type.TypeHint;
 import cz.seznam.euphoria.core.client.util.Pair;
 import cz.seznam.euphoria.core.client.util.Sums;
 import cz.seznam.euphoria.testing.DatasetAssert;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
-import org.apache.beam.sdk.options.PipelineOptions;
-import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.windowing.AfterWatermark;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
 import org.apache.beam.sdk.values.WindowingStrategy.AccumulationMode;
@@ -58,12 +55,6 @@ import org.junit.Test;
  * Simple test suite for RBK.
  */
 public class ReduceByKeyTest {
-
-  private BeamExecutor createExecutor() {
-    String[] args = {"--runner=DirectRunner"};
-    PipelineOptions options = PipelineOptionsFactory.fromArgs(args).as(PipelineOptions.class);
-    return new BeamExecutor(options).withAllowedLateness(Duration.ofHours(1));
-  }
 
   @Test
   public void testSimpleRBK() {
@@ -84,7 +75,7 @@ public class ReduceByKeyTest {
         .output()
         .persist(output);
 
-    BeamExecutor executor = createExecutor();
+    BeamExecutor executor = TestUtils.createExecutor();
     executor.execute(flow);
 
     DatasetAssert.unorderedEquals(output.getOutputs(), Pair.of(0, 8), Pair.of(1, 7));
@@ -134,7 +125,7 @@ public class ReduceByKeyTest {
         .output()
         .persist(sink);
 
-    BeamExecutor executor = createExecutor();
+    BeamExecutor executor = TestUtils.createExecutor();
     executor.execute(flow);
 
     DatasetAssert.unorderedEquals(
@@ -203,7 +194,7 @@ public class ReduceByKeyTest {
         .output()
         .persist(sink);
 
-    createExecutor().execute(flow);
+    TestUtils.createExecutor().execute(flow);
     DatasetAssert.unorderedEquals(sink.getOutputs(), 4, 6);
   }
 
