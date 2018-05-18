@@ -15,10 +15,9 @@
  */
 package cz.seznam.euphoria.beam;
 
-import cz.seznam.euphoria.beam.window.BeamWindowing;
+import cz.seznam.euphoria.beam.window.WindowingUtils;
 import cz.seznam.euphoria.core.client.accumulators.AccumulatorProvider;
 import cz.seznam.euphoria.core.client.dataset.windowing.Window;
-import cz.seznam.euphoria.core.client.dataset.windowing.Windowing;
 import cz.seznam.euphoria.core.client.functional.ReduceFunctor;
 import cz.seznam.euphoria.core.client.functional.UnaryFunction;
 import cz.seznam.euphoria.core.client.operator.ReduceByKey;
@@ -46,6 +45,10 @@ class ReduceByKeyTranslator implements OperatorTranslator<ReduceByKey> {
   private static <InputT, K, V, OutputT, W extends Window<W>> PCollection<Pair<K, OutputT>>
   doTranslate(ReduceByKey<InputT, K, V, OutputT, W> operator, BeamExecutorContext context) {
 
+    if (operator.getValueComparator() != null) { //TODO Could we even do values sorting ?
+      throw new UnsupportedOperationException("Values sorting is not supported.");
+    }
+
     final UnaryFunction<InputT, K> keyExtractor = operator.getKeyExtractor();
     final UnaryFunction<InputT, V> valueExtractor = operator.getValueExtractor();
     final ReduceFunctor<V, OutputT> reducer = operator.getReducer();
@@ -54,8 +57,8 @@ class ReduceByKeyTranslator implements OperatorTranslator<ReduceByKey> {
     final Coder<K> keyCoder = context.getCoder(keyExtractor);
     final Coder<V> valueCoder = context.getCoder(valueExtractor);
 
-    final PCollection<InputT> input = applyWindowingIfSpecified(operator,
-        context.getInput(operator), context);
+    final PCollection<InputT> input = WindowingUtils.applyWindowingIfSpecified(operator,
+        context.getInput(operator), context.getAllowedLateness(operator));
 
     // ~ create key & value extractor
     final MapElements<InputT, KV<K, V>> extractor =
@@ -99,48 +102,6 @@ class ReduceByKeyTranslator implements OperatorTranslator<ReduceByKey> {
       return grouped.apply(
           operator.getName() + "::reduce", ParDo.of(new ReduceDoFn<>(reducer, accumulators)));
     }
-  }
-
-  private static <InputT, K, V, OutputT, W extends Window<W>>
-  PCollection<InputT> applyWindowingIfSpecified(
-      ReduceByKey<InputT, K, V, OutputT, W> operator, PCollection<InputT> input,
-      BeamExecutorContext context) {
-
-    Windowing<InputT, W> userSpecifiedWindowing = operator.getWindowing();
-
-    if (userSpecifiedWindowing == null) {
-      return input;
-    }
-
-    if (!(userSpecifiedWindowing instanceof BeamWindowing)) {
-      throw new IllegalStateException(String.format(
-          "%s class only is supported to specify windowing.", BeamWindowing.class.getSimpleName()));
-    }
-
-    @SuppressWarnings("unchecked")
-    BeamWindowing<InputT, ?> beamWindowing = (BeamWindowing) userSpecifiedWindowing;
-
-    @SuppressWarnings("unchecked")
-    org.apache.beam.sdk.transforms.windowing.Window<InputT> beamWindow =
-        (org.apache.beam.sdk.transforms.windowing.Window<InputT>)
-            org.apache.beam.sdk.transforms.windowing.Window.into(beamWindowing.getWindowFn())
-                .triggering(beamWindowing.getBeamTrigger());
-
-    switch (beamWindowing.getAccumulationMode()) {
-      case DISCARDING_FIRED_PANES:
-        beamWindow = beamWindow.discardingFiredPanes();
-        break;
-      case ACCUMULATING_FIRED_PANES:
-        beamWindow = beamWindow.accumulatingFiredPanes();
-        break;
-      default:
-        throw new IllegalStateException(
-            "Unsupported accumulation mode '" + beamWindowing.getAccumulationMode() + "'");
-    }
-
-    beamWindow = beamWindow.withAllowedLateness(context.getAllowedLateness(operator));
-
-    return input.apply(operator.getName() + "::windowing", beamWindow);
   }
 
   private static <InputT, OutputT> SerializableFunction<Iterable<InputT>, InputT> asCombiner(

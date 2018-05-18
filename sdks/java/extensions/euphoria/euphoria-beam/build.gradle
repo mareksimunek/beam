@@ -16,7 +16,6 @@ dependencies {
     testCompile project(':beam-runners-direct-java')
     testCompile library.java.slf4j_api
     testCompile library.java.hamcrest_core
-
 }
 
 test.testLogging.showStandardStreams = true
